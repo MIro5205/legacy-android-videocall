@@ -17,7 +17,6 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
-import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.content.Context;
 
@@ -241,7 +240,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private boolean postRendezvous(int code, String value) {
         HttpURLConnection conn = null;
         try {
-            URL url = new URL("https://ntfy.sh/x10call" + code);
+            URL url = new URL("http://ntfy.sh/x10call" + code);
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
             conn.setDoOutput(true);
@@ -251,15 +250,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             byte[] body = value.getBytes("UTF-8");
             conn.setFixedLengthStreamingMode(body.length);
             conn.getOutputStream().write(body);
-            return conn.getResponseCode() >= 200 && conn.getResponseCode() < 300;
-        } catch (Exception e) { return false; }
+            int rc = conn.getResponseCode();
+            return rc >= 200 && rc < 300;
+        } catch (Exception e) { Log.e(TAG, "Post error: " + e.getMessage()); return false; }
         finally { if (conn != null) conn.disconnect(); }
     }
 
     private String getRendezvous(int code) {
         HttpURLConnection conn = null;
         try {
-            URL url = new URL("https://ntfy.sh/x10call" + code + "/json?poll=1");
+            URL url = new URL("http://ntfy.sh/x10call" + code + "/json?poll=1");
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(10000);
@@ -277,7 +277,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             int end = response.indexOf("\"", start);
             if (end == -1) return null;
             return response.substring(start, end);
-        } catch (Exception e) { return null; }
+        } catch (Exception e) { Log.e(TAG, "Get error: " + e.getMessage()); return null; }
         finally { if (conn != null) conn.disconnect(); }
     }
 
@@ -305,11 +305,18 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         return null;
     }
 
-    public void surfaceCreated(SurfaceHolder holder) { openCamera(holder); }
+    public void surfaceCreated(SurfaceHolder holder) {
+        surfaceHolder = holder;
+        uiHandler.postDelayed(new Runnable() {
+            public void run() { openCamera(surfaceHolder); }
+        }, 300);
+    }
+
     public void surfaceChanged(SurfaceHolder holder, int format, int w, int h) {}
     public void surfaceDestroyed(SurfaceHolder holder) { closeCamera(); }
 
     private void openCamera(SurfaceHolder holder) {
+        if (cameraRunning || holder == null) return;
         try {
             camera = Camera.open();
             Camera.Parameters p = camera.getParameters();
@@ -342,22 +349,33 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         setStatusUI("Call ended");
         setButtonsReady();
         uiHandler.post(new Runnable() {
-            public void run() { remoteView.setImageBitmap(null); statusText.setVisibility(View.VISIBLE); roomCodeText.setText(""); }
+            public void run() {
+                remoteView.setImageBitmap(null);
+                statusText.setVisibility(View.VISIBLE);
+                roomCodeText.setText("");
+            }
         });
     }
 
     private void setStatus(final String msg) { statusText.setText(msg); statusText.setVisibility(View.VISIBLE); }
     private void setStatusUI(final String msg) { uiHandler.post(new Runnable() { public void run() { setStatus(msg); } }); }
     private void setButtonsForCall(boolean enabled) {
-        hostBtn.setEnabled(enabled); joinBtn.setEnabled(enabled); roomInput.setEnabled(enabled); hangupBtn.setEnabled(!enabled);
+        hostBtn.setEnabled(enabled); joinBtn.setEnabled(enabled);
+        roomInput.setEnabled(enabled); hangupBtn.setEnabled(!enabled);
     }
     private void setButtonsReady() {
         uiHandler.post(new Runnable() {
-            public void run() { hostBtn.setEnabled(true); joinBtn.setEnabled(true); roomInput.setEnabled(true); hangupBtn.setEnabled(false); }
+            public void run() {
+                hostBtn.setEnabled(true); joinBtn.setEnabled(true);
+                roomInput.setEnabled(true); hangupBtn.setEnabled(false);
+            }
         });
     }
 
     @Override protected void onDestroy() { super.onDestroy(); hangup(); closeCamera(); }
     @Override protected void onPause()   { super.onPause(); if (!connected) closeCamera(); }
-    @Override protected void onResume()  { super.onResume(); if (!cameraRunning && surfaceHolder != null) openCamera(surfaceHolder); }
+    @Override protected void onResume()  {
+        super.onResume();
+        if (!cameraRunning && surfaceHolder != null) openCamera(surfaceHolder);
+    }
 }
