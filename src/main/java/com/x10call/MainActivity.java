@@ -232,4 +232,132 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         try {
             YuvImage yuv = new YuvImage(data, ImageFormat.NV21, FRAME_WIDTH, FRAME_HEIGHT, null);
             ByteArrayOutputStream baos = new ByteArrayOutputStream(8192);
-            yuv.compressToJpeg(new R
+            yuv.compressToJpeg(new Rect(0, 0, FRAME_WIDTH, FRAME_HEIGHT), JPEG_QUALITY, baos);
+            synchronized (frameLock) { pendingFrameJpeg = baos.toByteArray(); }
+        } catch (Exception e) { Log.w(TAG, "Frame error", e); }
+        cam.addCallbackBuffer(data);
+    }
+
+    private boolean postRendezvous(int code, String value) {
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL("https://ntfy.sh/x10call" + code);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(10000);
+            conn.setRequestProperty("Content-Type", "text/plain");
+            byte[] body = value.getBytes("UTF-8");
+            conn.setFixedLengthStreamingMode(body.length);
+            conn.getOutputStream().write(body);
+            return conn.getResponseCode() >= 200 && conn.getResponseCode() < 300;
+        } catch (Exception e) { return false; }
+        finally { if (conn != null) conn.disconnect(); }
+    }
+
+    private String getRendezvous(int code) {
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL("https://ntfy.sh/x10call" + code + "/json?poll=1");
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(10000);
+            if (conn.getResponseCode() != 200) return null;
+            InputStream is = conn.getInputStream();
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            byte[] tmp = new byte[512];
+            int n;
+            while ((n = is.read(tmp)) != -1) baos.write(tmp, 0, n);
+            String response = baos.toString("UTF-8").trim();
+            int msgIdx = response.lastIndexOf("\"message\":\"");
+            if (msgIdx == -1) return null;
+            int start = msgIdx + 11;
+            int end = response.indexOf("\"", start);
+            if (end == -1) return null;
+            return response.substring(start, end);
+        } catch (Exception e) { return null; }
+        finally { if (conn != null) conn.disconnect(); }
+    }
+
+    private String getLocalIp() {
+        try {
+            Socket s = new Socket();
+            s.connect(new java.net.InetSocketAddress("8.8.8.8", 80), 3000);
+            String ip = s.getLocalAddress().getHostAddress();
+            s.close();
+            return ip;
+        } catch (Exception e) {
+            try {
+                java.util.Enumeration<java.net.NetworkInterface> ifaces = java.net.NetworkInterface.getNetworkInterfaces();
+                while (ifaces.hasMoreElements()) {
+                    java.net.NetworkInterface iface = ifaces.nextElement();
+                    java.util.Enumeration<InetAddress> addrs = iface.getInetAddresses();
+                    while (addrs.hasMoreElements()) {
+                        InetAddress addr = addrs.nextElement();
+                        if (!addr.isLoopbackAddress() && !addr.getHostAddress().contains(":"))
+                            return addr.getHostAddress();
+                    }
+                }
+            } catch (Exception ex) {}
+        }
+        return null;
+    }
+
+    public void surfaceCreated(SurfaceHolder holder) { openCamera(holder); }
+    public void surfaceChanged(SurfaceHolder holder, int format, int w, int h) {}
+    public void surfaceDestroyed(SurfaceHolder holder) { closeCamera(); }
+
+    private void openCamera(SurfaceHolder holder) {
+        try {
+            camera = Camera.open();
+            Camera.Parameters p = camera.getParameters();
+            p.setPreviewSize(FRAME_WIDTH, FRAME_HEIGHT);
+            p.setPreviewFormat(ImageFormat.NV21);
+            try { p.setFlashMode(Camera.Parameters.FLASH_MODE_OFF); } catch (Exception ignored) {}
+            try { p.setFocusMode(Camera.Parameters.FOCUS_MODE_FIXED); } catch (Exception ignored) {}
+            camera.setParameters(p);
+            camera.setPreviewDisplay(holder);
+            yuvBuffer = new byte[FRAME_WIDTH * FRAME_HEIGHT * 3 / 2];
+            camera.addCallbackBuffer(yuvBuffer);
+            camera.setPreviewCallbackWithBuffer(this);
+            camera.startPreview();
+            cameraRunning = true;
+        } catch (Exception e) { setStatus("Camera error: " + e.getMessage()); }
+    }
+
+    private void closeCamera() {
+        if (camera != null) {
+            try { camera.setPreviewCallbackWithBuffer(null); camera.stopPreview(); camera.release(); } catch (Exception ignored) {}
+            camera = null; cameraRunning = false;
+        }
+    }
+
+    private void hangup() {
+        connected = false;
+        try { if (connSocket   != null) connSocket.close();   } catch (Exception ignored) {}
+        try { if (serverSocket != null) serverSocket.close(); } catch (Exception ignored) {}
+        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        setStatusUI("Call ended");
+        setButtonsReady();
+        uiHandler.post(new Runnable() {
+            public void run() { remoteView.setImageBitmap(null); statusText.setVisibility(View.VISIBLE); roomCodeText.setText(""); }
+        });
+    }
+
+    private void setStatus(final String msg) { statusText.setText(msg); statusText.setVisibility(View.VISIBLE); }
+    private void setStatusUI(final String msg) { uiHandler.post(new Runnable() { public void run() { setStatus(msg); } }); }
+    private void setButtonsForCall(boolean enabled) {
+        hostBtn.setEnabled(enabled); joinBtn.setEnabled(enabled); roomInput.setEnabled(enabled); hangupBtn.setEnabled(!enabled);
+    }
+    private void setButtonsReady() {
+        uiHandler.post(new Runnable() {
+            public void run() { hostBtn.setEnabled(true); joinBtn.setEnabled(true); roomInput.setEnabled(true); hangupBtn.setEnabled(false); }
+        });
+    }
+
+    @Override protected void onDestroy() { super.onDestroy(); hangup(); closeCamera(); }
+    @Override protected void onPause()   { super.onPause(); if (!connected) closeCamera(); }
+    @Override protected void onResume()  { super.onResume(); if (!cameraRunning && surfaceHolder != null) openCamera(surfaceHolder); }
+}
