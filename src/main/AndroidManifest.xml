@@ -4,15 +4,12 @@
     android:versionCode="1"
     android:versionName="1.0">
 
-    <uses-sdk android:minSdkVersion="7" android:targetSdkVersion="7" />
-
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-
     <uses-feature android:name="android.hardware.camera" android:required="true" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
@@ -20,7 +17,6 @@
         android:label="X10Call"
         android:icon="@drawable/ic_launcher"
         android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
-
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -31,7 +27,5 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
     </application>
-
 </manifest>
