@@ -4,10 +4,10 @@ import android.app.Activity;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
+import android.graphics.Typeface;
 import android.graphics.YuvImage;
 import android.graphics.ImageFormat;
 import android.graphics.Rect;
-import android.graphics.Typeface;
 import android.hardware.Camera;
 import android.media.AudioFormat;
 import android.media.AudioManager;
@@ -20,14 +20,11 @@ import android.os.Handler;
 import android.os.PowerManager;
 import android.os.SystemClock;
 import android.util.Log;
-import android.view.Gravity;
-import android.view.LayoutInflater;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
-import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -51,14 +48,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     private static final String TAG = "X10Call";
 
-    // Video settings — tuned for X10 Mini Pro
-    private static final int FRAME_WIDTH        = 320;
-    private static final int FRAME_HEIGHT       = 240;
-    private static final int JPEG_QUALITY       = 35;
-    private static final int TARGET_FPS         = 12;
-    private static final long FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
+    // Video — X10 Mini Pro native resolution
+    private static final int   FRAME_WIDTH        = 320;
+    private static final int   FRAME_HEIGHT       = 240;
+    private static final int   JPEG_QUALITY       = 35;
+    private static final int   TARGET_FPS         = 12;
+    private static final long  FRAME_INTERVAL_MS  = 1000 / TARGET_FPS;
 
-    // Audio settings
+    // Audio — 8kHz mono PCM, minimum CPU
     private static final int  AUDIO_SAMPLE_RATE  = 8000;
     private static final int  AUDIO_CHANNEL_IN   = AudioFormat.CHANNEL_IN_MONO;
     private static final int  AUDIO_CHANNEL_OUT  = AudioFormat.CHANNEL_OUT_MONO;
@@ -66,50 +63,48 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private static final int  AUDIO_BUFFER_MS    = 160;
     private static final int  AUDIO_BUFFER_BYTES = AUDIO_SAMPLE_RATE * 2 * AUDIO_BUFFER_MS / 1000;
 
-    // Packet types
+    // Packet tags
     private static final int PKT_VIDEO = 1;
     private static final int PKT_AUDIO = 2;
 
-    // ── PRE-CALL UI ───────────────────────────────────────────────────────────
-    private View         preCallLayout;   // the entire pre-call screen
-    private SurfaceView  localPreview;
-    private TextView     statusText;
-    private TextView     roomCodeText;
-    private EditText     roomInput;
-    private Button       hostBtn;
-    private Button       joinBtn;
+    // ── Pre-call UI ──────────────────────────────────────────────────────────
+    private View      preCallLayout;
+    private View      roomCodeCard;
+    private SurfaceView localPreview;
+    private TextView  statusText;
+    private TextView  roomCodeText;
+    private EditText  roomInput;
+    private TextView  hostBtn;
+    private TextView  joinBtn;
 
-    // ── IN-CALL UI ────────────────────────────────────────────────────────────
-    private View         inCallLayout;   // full-screen call view
-    private ImageView    remoteView;
-    private TextView     callStatsText;  // elapsed time + bytes, top-right overlay
-    private View         menuAnchor;     // the ⋮ button bottom-right
+    // ── In-call UI ───────────────────────────────────────────────────────────
+    private View      inCallLayout;
+    private ImageView remoteView;
+    private TextView  callStatsText;
+    private View      menuAnchor;
 
-    // ── Typeface (loaded once) ────────────────────────────────────────────────
-    private Typeface robotoLight;
+    // ── Fonts ────────────────────────────────────────────────────────────────
     private Typeface robotoRegular;
+    private Typeface robotoLight;
 
-    // ── Camera ────────────────────────────────────────────────────────────────
+    // ── Camera ───────────────────────────────────────────────────────────────
     private Camera        camera;
     private SurfaceHolder surfaceHolder;
     private boolean       cameraRunning = false;
     private byte[]        yuvBuffer;
 
-    // ── Audio ─────────────────────────────────────────────────────────────────
+    // ── Audio ────────────────────────────────────────────────────────────────
     private AudioRecord  audioRecord;
     private AudioTrack   audioTrack;
     private Thread       audioSendThread;
     private boolean      audioRunning = false;
     private boolean      micMuted     = false;
+    private boolean      cameraMuted  = false;
 
-    // ── Camera toggle ─────────────────────────────────────────────────────────
-    private boolean      cameraMuted  = false;   // true = sending black frames
+    // ── Video rotation ───────────────────────────────────────────────────────
+    private int remoteRotation = 0;
 
-    // ── Video rotation ────────────────────────────────────────────────────────
-    // Tracks rotation applied to received video (0 / 90 / 180 / 270)
-    private int          remoteRotation = 0;
-
-    // ── Network ───────────────────────────────────────────────────────────────
+    // ── Network ──────────────────────────────────────────────────────────────
     private ServerSocket     serverSocket;
     private Socket           connSocket;
     private DataOutputStream outStream;
@@ -117,24 +112,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private boolean          connected = false;
     private int              roomCode  = 0;
 
-    // ── Threading ─────────────────────────────────────────────────────────────
-    private Handler uiHandler    = new Handler();
+    // ── Threading ────────────────────────────────────────────────────────────
+    private Handler uiHandler = new Handler();
     private Thread  videoSendThread, recvThread, serverThread, connectThread;
 
-    // ── Frame buffer ──────────────────────────────────────────────────────────
+    // ── Frame buffer ─────────────────────────────────────────────────────────
     private final Object frameLock        = new Object();
     private byte[]       pendingFrameJpeg = null;
     private long         lastSendTime     = 0;
 
-    // ── Output lock ───────────────────────────────────────────────────────────
+    // ── Output lock ──────────────────────────────────────────────────────────
     private final Object outLock = new Object();
 
-    // ── WakeLock ──────────────────────────────────────────────────────────────
+    // ── Wake lock ────────────────────────────────────────────────────────────
     private PowerManager.WakeLock wakeLock;
 
-    // ── Stats ─────────────────────────────────────────────────────────────────
-    private long callStartMs   = 0;
-    private long bytesReceived = 0;
+    // ── Stats ────────────────────────────────────────────────────────────────
+    private long     callStartMs   = 0;
+    private long     bytesReceived = 0;
     private Runnable statsRunnable;
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -142,48 +137,47 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        // Full-screen, no title bar
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
         requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
-
         setContentView(R.layout.main);
 
-        // Load Roboto from assets — zero overhead, API 2.1 compatible
+        // Load Roboto — pure asset load, zero network, zero library
         try {
-            robotoLight   = Typeface.createFromAsset(getAssets(), "fonts/Roboto-Light.ttf");
             robotoRegular = Typeface.createFromAsset(getAssets(), "fonts/Roboto-Regular.ttf");
+            robotoLight   = Typeface.createFromAsset(getAssets(), "fonts/Roboto-Light.ttf");
         } catch (Exception e) {
-            Log.w(TAG, "Roboto font not found — using system font. Add fonts/Roboto-Regular.ttf and fonts/Roboto-Light.ttf to assets/");
-            robotoLight   = Typeface.DEFAULT;
             robotoRegular = Typeface.DEFAULT;
+            robotoLight   = Typeface.DEFAULT;
+            Log.w(TAG, "Roboto not found, using system font");
         }
 
-        // ── Wire up pre-call UI ───────────────────────────────────────────────
+        // ── Wire views ───────────────────────────────────────────────────────
         preCallLayout = findViewById(R.id.preCallLayout);
+        roomCodeCard  = findViewById(R.id.roomCodeCard);
         localPreview  = (SurfaceView) findViewById(R.id.localPreview);
         statusText    = (TextView)    findViewById(R.id.statusText);
         roomCodeText  = (TextView)    findViewById(R.id.roomCodeText);
         roomInput     = (EditText)    findViewById(R.id.roomInput);
-        hostBtn       = (Button)      findViewById(R.id.hostBtn);
-        joinBtn       = (Button)      findViewById(R.id.joinBtn);
+        hostBtn       = (TextView)    findViewById(R.id.hostBtn);
+        joinBtn       = (TextView)    findViewById(R.id.joinBtn);
 
-        applyFont(statusText,   robotoLight);
-        applyFont(roomCodeText, robotoRegular);
-        applyFont(roomInput,    robotoLight);
-        applyFont(hostBtn,      robotoRegular);
-        applyFont(joinBtn,      robotoRegular);
-
-        // ── Wire up in-call UI ────────────────────────────────────────────────
         inCallLayout  = findViewById(R.id.inCallLayout);
-        remoteView    = (ImageView) findViewById(R.id.remoteView);
-        callStatsText = (TextView)  findViewById(R.id.callStatsText);
+        remoteView    = (ImageView)   findViewById(R.id.remoteView);
+        callStatsText = (TextView)    findViewById(R.id.callStatsText);
         menuAnchor    = findViewById(R.id.menuAnchor);
 
-        applyFont(callStatsText, robotoLight);
+        // Apply Roboto everywhere
+        setFont(statusText,    robotoLight);
+        setFont(roomCodeText,  robotoRegular);
+        setFont(roomInput,     robotoLight);
+        setFont(hostBtn,       robotoRegular);
+        setFont(joinBtn,       robotoRegular);
+        setFont(callStatsText, robotoLight);
+        setFont((TextView) menuAnchor, robotoRegular);
 
-        // remoteView fills screen — scale type CENTER_CROP to fill every pixel
         remoteView.setScaleType(ImageView.ScaleType.CENTER_CROP);
 
+        // Surface for camera preview
         surfaceHolder = localPreview.getHolder();
         surfaceHolder.addCallback(this);
         try { surfaceHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS); } catch (Exception ignored) {}
@@ -191,6 +185,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         wakeLock = pm.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "x10call:wakelock");
 
+        // ── Buttons — using TextView so drawables always show correctly ───────
         hostBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { startHost(); }
         });
@@ -201,22 +196,24 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 else setStatus("Enter the 6-digit room code");
             }
         });
-
-        // ⋮ menu button — shows hidden controls during call
         menuAnchor.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { showCallMenu(v); }
         });
 
-        // ── FIX 1: Route audio to SPEAKER immediately and keep it there ───────
+        // ── FIX 1: Audio to loudspeaker via STREAM_MUSIC ─────────────────────
         AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-        am.setMode(AudioManager.MODE_NORMAL);      // NOT MODE_IN_CALL / MODE_IN_COMMUNICATION
-        am.setSpeakerphoneOn(true);                // speaker on by default
+        am.setMode(AudioManager.MODE_NORMAL);
+        am.setSpeakerphoneOn(true);
 
         showPreCall();
-        setStatus("Ready");
     }
 
-    // ── SHOW / HIDE SCREENS ───────────────────────────────────────────────────
+    // ── FONT HELPER ───────────────────────────────────────────────────────────
+    private void setFont(TextView tv, Typeface tf) {
+        if (tv != null && tf != null) tv.setTypeface(tf);
+    }
+
+    // ── SCREEN SWITCHING ──────────────────────────────────────────────────────
     private void showPreCall() {
         preCallLayout.setVisibility(View.VISIBLE);
         inCallLayout.setVisibility(View.GONE);
@@ -226,24 +223,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private void showInCall() {
         preCallLayout.setVisibility(View.GONE);
         inCallLayout.setVisibility(View.VISIBLE);
-        // Shrink local preview to a small pip in the corner — or hide if camera is off
-        localPreview.setVisibility(View.VISIBLE);
-        callStartMs = SystemClock.elapsedRealtime();
+        callStartMs   = SystemClock.elapsedRealtime();
         bytesReceived = 0;
         startStatsUpdater();
     }
 
-    // ── CALL STATS OVERLAY (time + data) ─────────────────────────────────────
+    // ── STATS OVERLAY ─────────────────────────────────────────────────────────
     private void startStatsUpdater() {
         statsRunnable = new Runnable() {
             public void run() {
                 if (!connected) return;
-                long elapsed = (SystemClock.elapsedRealtime() - callStartMs) / 1000;
-                long mins = elapsed / 60;
-                long secs = elapsed % 60;
-                String time = String.format("%d:%02d", mins, secs);
-                String data = formatBytes(bytesReceived);
-                callStatsText.setText(time + " · " + data);
+                long secs  = (SystemClock.elapsedRealtime() - callStartMs) / 1000;
+                String t   = secs / 60 + ":" + String.format("%02d", secs % 60);
+                callStatsText.setText(t + " · " + fmtBytes(bytesReceived));
                 uiHandler.postDelayed(this, 1000);
             }
         };
@@ -251,102 +243,64 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private void stopStatsUpdater() {
-        if (statsRunnable != null) {
-            uiHandler.removeCallbacks(statsRunnable);
-            statsRunnable = null;
-        }
+        if (statsRunnable != null) { uiHandler.removeCallbacks(statsRunnable); statsRunnable = null; }
     }
 
-    private String formatBytes(long bytes) {
-        if (bytes < 1024)           return bytes + "B";
-        if (bytes < 1024 * 1024)    return (bytes / 1024) + "KB";
-        return String.format("%.1fMB", bytes / (1024f * 1024f));
+    private String fmtBytes(long b) {
+        if (b < 1024)        return b + "B";
+        if (b < 1048576)     return (b / 1024) + "KB";
+        return String.format("%.1fMB", b / 1048576f);
     }
 
-    // ── HIDDEN CALL MENU (PopupWindow — legacy Android compatible) ────────────
+    // ── IN-CALL POPUP MENU ────────────────────────────────────────────────────
     private void showCallMenu(View anchor) {
-        // Build menu layout entirely in code — no extra XML needed
-        LinearLayout menuLayout = new LinearLayout(this);
-        menuLayout.setOrientation(LinearLayout.VERTICAL);
-        menuLayout.setBackgroundResource(R.drawable.menu_bg);    // rounded rect drawable
-        menuLayout.setPadding(dp(8), dp(8), dp(8), dp(8));
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setBackgroundResource(R.drawable.menu_bg);
+        layout.setPadding(dp(6), dp(6), dp(6), dp(6));
 
         final PopupWindow popup = new PopupWindow(
-            menuLayout,
-            dp(160),
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            true  // focusable — dismisses on outside touch
-        );
+            layout, dp(150), ViewGroup.LayoutParams.WRAP_CONTENT, true);
 
-        TextView muteBtn    = makeMenuButton(micMuted    ? "Unmute Mic"    : "Mute Mic");
-        TextView camBtn     = makeMenuButton(cameraMuted ? "Camera On"     : "Camera Off");
-        TextView rotateBtn  = makeMenuButton("Rotate Video");
-        TextView hangupBtn  = makeMenuButton("End Call");
-        hangupBtn.setTextColor(0xFFE53935); // red for hang up
+        addMenuItem(layout, micMuted    ? "Unmute mic"    : "Mute mic",    0xFFFFFFFF, popup, new Runnable() { public void run() { micMuted    = !micMuted;    } });
+        addMenuDivider(layout);
+        addMenuItem(layout, cameraMuted ? "Camera on"     : "Camera off",  0xFFFFFFFF, popup, new Runnable() { public void run() { cameraMuted = !cameraMuted; } });
+        addMenuDivider(layout);
+        addMenuItem(layout, "Rotate video",  0xFFFFFFFF, popup, new Runnable() { public void run() { remoteRotation = (remoteRotation + 90) % 360; } });
+        addMenuDivider(layout);
+        addMenuItem(layout, "End call",      0xFFEF5350, popup, new Runnable() { public void run() { hangup(); } });
 
-        menuLayout.addView(muteBtn);
-        menuLayout.addView(makeDivider());
-        menuLayout.addView(camBtn);
-        menuLayout.addView(makeDivider());
-        menuLayout.addView(rotateBtn);
-        menuLayout.addView(makeDivider());
-        menuLayout.addView(hangupBtn);
-
-        muteBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                micMuted = !micMuted;
-                popup.dismiss();
-            }
-        });
-        camBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                cameraMuted = !cameraMuted;
-                localPreview.setVisibility(cameraMuted ? View.INVISIBLE : View.VISIBLE);
-                popup.dismiss();
-            }
-        });
-        rotateBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                remoteRotation = (remoteRotation + 90) % 360;
-                popup.dismiss();
-            }
-        });
-        hangupBtn.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                popup.dismiss();
-                hangup();
-            }
-        });
-
-        // Show above the anchor, aligned to its right edge
         popup.setAnimationStyle(android.R.style.Animation_Dialog);
-        popup.showAsDropDown(anchor, 0, -dp(200));
+        // Show above the anchor — offset upward by estimated menu height
+        popup.showAsDropDown(anchor, 0, -dp(220));
     }
 
-    private TextView makeMenuButton(String label) {
+    private void addMenuItem(LinearLayout parent, final String label, final int color,
+                             final PopupWindow popup, final Runnable action) {
         TextView tv = new TextView(this);
         tv.setText(label);
         tv.setTypeface(robotoRegular);
-        tv.setTextSize(15);
-        tv.setTextColor(0xFFFFFFFF);
-        tv.setPadding(dp(12), dp(14), dp(12), dp(14));
-        tv.setBackgroundResource(R.drawable.menu_item_selector); // pressed state
-        return tv;
+        tv.setTextSize(14);
+        tv.setTextColor(color);
+        tv.setPadding(dp(14), dp(13), dp(14), dp(13));
+        tv.setBackgroundResource(R.drawable.menu_item_selector);
+        tv.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { popup.dismiss(); action.run(); }
+        });
+        parent.addView(tv);
     }
 
-    private View makeDivider() {
+    private void addMenuDivider(LinearLayout parent) {
         View v = new View(this);
-        v.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.FILL_PARENT, 1));
-        v.setBackgroundColor(0x33FFFFFF);
-        return v;
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.FILL_PARENT, 1);
+        v.setLayoutParams(lp);
+        v.setBackgroundColor(0x22FFFFFF);
+        parent.addView(v);
     }
 
-    private int dp(int dp) {
-        return (int) (dp * getResources().getDisplayMetrics().density + 0.5f);
-    }
-
-    private void applyFont(TextView tv, Typeface tf) {
-        if (tv != null && tf != null) tv.setTypeface(tf);
+    private int dp(int val) {
+        return (int) (val * getResources().getDisplayMetrics().density + 0.5f);
     }
 
     // ── HOST ──────────────────────────────────────────────────────────────────
@@ -355,20 +309,21 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         hostBtn.setEnabled(false);
         joinBtn.setEnabled(false);
         roomInput.setEnabled(false);
-        roomCodeText.setText("Room: " + roomCode);
-        setStatus("Starting...");
+        roomCodeCard.setVisibility(View.VISIBLE);
+        roomCodeText.setText("" + roomCode);
+        setStatus("Waiting for someone to join...");
 
         serverThread = new Thread(new Runnable() {
             public void run() {
                 try {
                     String myIp = getLocalIp();
-                    if (myIp == null) { setStatusUI("No network."); setButtonsReady(); return; }
+                    if (myIp == null) { setStatusUI("No network."); resetButtons(); return; }
                     int port = 10000 + (roomCode % 50000);
                     serverSocket = new ServerSocket(port);
                     serverSocket.setSoTimeout(180000);
-                    boolean posted = postRendezvous(roomCode, myIp + ":" + port);
-                    if (!posted) { setStatusUI("Rendezvous failed. Check internet."); setButtonsReady(); return; }
-                    setStatusUI("Your code: " + roomCode + "\nWaiting for caller...");
+                    if (!postRendezvous(roomCode, myIp + ":" + port)) {
+                        setStatusUI("Rendezvous failed."); resetButtons(); return;
+                    }
                     connSocket = serverSocket.accept();
                     connSocket.setTcpNoDelay(true);
                     connSocket.setSendBufferSize(32768);
@@ -379,7 +334,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 } catch (Exception e) {
                     Log.e(TAG, "Server error", e);
                     setStatusUI("Error: " + e.getMessage());
-                    setButtonsReady();
+                    resetButtons();
                 }
             }
         });
@@ -405,7 +360,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                         setStatusUI("Waiting for host... (" + (i + 1) + ")");
                         Thread.sleep(2000);
                     }
-                    if (payload == null) { setStatusUI("Room not found."); setButtonsReady(); return; }
+                    if (payload == null) { setStatusUI("Room not found."); resetButtons(); return; }
                     String[] parts = payload.split(":");
                     String host = parts[0].trim();
                     int    port = Integer.parseInt(parts[1].trim());
@@ -429,7 +384,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 } catch (Exception e) {
                     Log.e(TAG, "Join error", e);
                     setStatusUI("Failed: " + e.getMessage());
-                    setButtonsReady();
+                    resetButtons();
                 }
             }
         });
@@ -441,19 +396,15 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private void onConnected() {
         connected = true;
         if (wakeLock != null && !wakeLock.isHeld()) wakeLock.acquire();
-
-        // ── FIX 1: Force speaker AFTER connection established ─────────────────
-        // Must happen on a thread-safe call to AudioManager — use uiHandler
         uiHandler.post(new Runnable() {
             public void run() {
+                // FIX 1: Re-assert speaker after connection — some devices reset mode
                 AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-                // MODE_NORMAL lets AudioTrack stream to STREAM_MUSIC → big speaker
                 am.setMode(AudioManager.MODE_NORMAL);
                 am.setSpeakerphoneOn(true);
                 showInCall();
             }
         });
-
         startVideoSendThread();
         startRecvThread();
         startAudio();
@@ -472,7 +423,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                         }
                     }
                     if (frame != null) {
-                        // If camera is muted, replace with a tiny black JPEG
                         if (cameraMuted) frame = getBlackFrame();
                         try {
                             synchronized (outLock) {
@@ -496,13 +446,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         videoSendThread.start();
     }
 
-    // Cached black frame so we don't allocate on every send when cam is off
     private byte[] blackFrameCache = null;
     private byte[] getBlackFrame() {
         if (blackFrameCache == null) {
             Bitmap b = Bitmap.createBitmap(FRAME_WIDTH, FRAME_HEIGHT, Bitmap.Config.RGB_565);
             b.eraseColor(0xFF000000);
-            ByteArrayOutputStream baos = new ByteArrayOutputStream(1024);
+            ByteArrayOutputStream baos = new ByteArrayOutputStream(512);
             b.compress(Bitmap.CompressFormat.JPEG, 20, baos);
             b.recycle();
             blackFrameCache = baos.toByteArray();
@@ -510,7 +459,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         return blackFrameCache;
     }
 
-    // ── UNIFIED RECV ──────────────────────────────────────────────────────────
+    // ── RECV ──────────────────────────────────────────────────────────────────
     private void startRecvThread() {
         recvThread = new Thread(new Runnable() {
             public void run() {
@@ -527,17 +476,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                         if (pktType == PKT_VIDEO) {
                             Bitmap bmp = BitmapFactory.decodeByteArray(buf, 0, len, opts);
                             if (bmp != null) {
-                                // Apply rotation if user requested it
-                                final Bitmap displayBmp = applyRotation(bmp, remoteRotation);
+                                final Bitmap out = applyRotation(bmp, remoteRotation);
                                 uiHandler.post(new Runnable() {
-                                    public void run() {
-                                        remoteView.setImageBitmap(displayBmp);
-                                    }
+                                    public void run() { remoteView.setImageBitmap(out); }
                                 });
                             }
                         } else if (pktType == PKT_AUDIO) {
                             if (audioTrack != null && audioRunning) {
-                                // If mic is muted on our end we still play their audio
                                 audioTrack.write(buf, 0, len);
                             }
                         }
@@ -553,37 +498,29 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         recvThread.start();
     }
 
-    // Rotate bitmap using Matrix — no heavyweight library needed
     private Bitmap applyRotation(Bitmap src, int degrees) {
         if (degrees == 0) return src;
         Matrix m = new Matrix();
         m.postRotate(degrees);
-        Bitmap rotated = Bitmap.createBitmap(src, 0, 0, src.getWidth(), src.getHeight(), m, false);
+        Bitmap r = Bitmap.createBitmap(src, 0, 0, src.getWidth(), src.getHeight(), m, false);
         src.recycle();
-        return rotated;
+        return r;
     }
 
-    // ── AUDIO ─────────────────────────────────────────────────────────────────
-    // ── FIX 1 CORE: Use STREAM_MUSIC instead of STREAM_VOICE_CALL ─────────────
-    // STREAM_VOICE_CALL is hard-wired to the earpiece on most Android 2.x devices.
-    // STREAM_MUSIC routes through the media path → main loudspeaker.
+    // ── AUDIO — FIX 1: STREAM_MUSIC routes to loudspeaker ────────────────────
     private void startAudio() {
         int minBuf = AudioRecord.getMinBufferSize(AUDIO_SAMPLE_RATE, AUDIO_CHANNEL_IN, AUDIO_FORMAT);
         int recBuf = Math.max(minBuf, AUDIO_BUFFER_BYTES);
 
         try {
-            audioRecord = new AudioRecord(
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+            audioRecord = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                 AUDIO_SAMPLE_RATE, AUDIO_CHANNEL_IN, AUDIO_FORMAT, recBuf);
         } catch (Exception e) {
-            Log.w(TAG, "AudioRecord VOICE_COMMUNICATION failed, trying MIC");
             try {
-                audioRecord = new AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
+                audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC,
                     AUDIO_SAMPLE_RATE, AUDIO_CHANNEL_IN, AUDIO_FORMAT, recBuf);
             } catch (Exception e2) {
-                Log.e(TAG, "AudioRecord unavailable: " + e2.getMessage());
-                return;
+                Log.e(TAG, "AudioRecord unavailable"); return;
             }
         }
 
@@ -591,9 +528,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             AudioTrack.getMinBufferSize(AUDIO_SAMPLE_RATE, AUDIO_CHANNEL_OUT, AUDIO_FORMAT),
             AUDIO_BUFFER_BYTES);
 
-        // *** KEY CHANGE: STREAM_MUSIC → routes to loudspeaker ***
-        audioTrack = new AudioTrack(
-            AudioManager.STREAM_MUSIC,          // was STREAM_VOICE_CALL
+        // STREAM_MUSIC → goes through media path → main speaker, never earpiece
+        audioTrack = new AudioTrack(AudioManager.STREAM_MUSIC,
             AUDIO_SAMPLE_RATE, AUDIO_CHANNEL_OUT, AUDIO_FORMAT,
             playBuf, AudioTrack.MODE_STREAM);
 
@@ -603,29 +539,17 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
         audioSendThread = new Thread(new Runnable() {
             public void run() {
-                byte[] buf = new byte[AUDIO_BUFFER_BYTES];
+                byte[] buf    = new byte[AUDIO_BUFFER_BYTES];
+                byte[] silence = new byte[AUDIO_BUFFER_BYTES];
                 while (connected && audioRunning) {
                     int read = audioRecord.read(buf, 0, buf.length);
-                    if (read > 0 && !micMuted) {  // honour mute flag
+                    if (read > 0) {
+                        byte[] send = micMuted ? silence : buf;
                         try {
                             synchronized (outLock) {
                                 outStream.writeByte(PKT_AUDIO);
                                 outStream.writeInt(read);
-                                outStream.write(buf, 0, read);
-                                outStream.flush();
-                            }
-                        } catch (Exception e) {
-                            if (connected) hangup();
-                            break;
-                        }
-                    } else if (read > 0 && micMuted) {
-                        // Send silence so the other side doesn't stall
-                        try {
-                            byte[] silence = new byte[read]; // zero-filled
-                            synchronized (outLock) {
-                                outStream.writeByte(PKT_AUDIO);
-                                outStream.writeInt(read);
-                                outStream.write(silence, 0, read);
+                                outStream.write(send, 0, read);
                                 outStream.flush();
                             }
                         } catch (Exception e) {
@@ -670,37 +594,34 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         try { if (connSocket   != null) connSocket.close();   } catch (Exception ignored) {}
         try { if (serverSocket != null) serverSocket.close(); } catch (Exception ignored) {}
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
-
-        // Reset audio mode
         AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         am.setSpeakerphoneOn(false);
         am.setMode(AudioManager.MODE_NORMAL);
-
         setStatusUI("Call ended");
-        setButtonsReady();
         uiHandler.post(new Runnable() {
             public void run() {
                 remoteView.setImageBitmap(null);
-                showPreCall();
+                roomCodeCard.setVisibility(View.GONE);
                 roomCodeText.setText("");
+                showPreCall();
+                resetButtons();
             }
         });
     }
 
     // ── UI HELPERS ────────────────────────────────────────────────────────────
     private void setStatus(final String msg) {
-        statusText.setText(msg);
-        statusText.setVisibility(View.VISIBLE);
+        if (statusText != null) statusText.setText(msg);
     }
     private void setStatusUI(final String msg) {
         uiHandler.post(new Runnable() { public void run() { setStatus(msg); } });
     }
-    private void setButtonsReady() {
+    private void resetButtons() {
         uiHandler.post(new Runnable() {
             public void run() {
-                hostBtn.setEnabled(true);
-                joinBtn.setEnabled(true);
-                roomInput.setEnabled(true);
+                if (hostBtn  != null) hostBtn.setEnabled(true);
+                if (joinBtn  != null) joinBtn.setEnabled(true);
+                if (roomInput != null) roomInput.setEnabled(true);
             }
         });
     }
@@ -719,11 +640,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             byte[] body = value.getBytes("UTF-8");
             conn.setFixedLengthStreamingMode(body.length);
             conn.getOutputStream().write(body);
-            int rc = conn.getResponseCode();
-            return rc >= 200 && rc < 300;
+            return conn.getResponseCode() >= 200 && conn.getResponseCode() < 300;
         } catch (Exception e) {
-            Log.e(TAG, "Post error: " + e.getMessage());
-            return false;
+            Log.e(TAG, "Post error: " + e.getMessage()); return false;
         } finally { if (conn != null) conn.disconnect(); }
     }
 
@@ -736,32 +655,26 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             conn.setConnectTimeout(10000);
             conn.setReadTimeout(10000);
             if (conn.getResponseCode() != 200) return null;
-            InputStream is = conn.getInputStream();
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            byte[] tmp = new byte[512];
-            int n;
-            while ((n = is.read(tmp)) != -1) baos.write(tmp, 0, n);
+            byte[] tmp = new byte[512]; int n;
+            while ((n = conn.getInputStream().read(tmp)) != -1) baos.write(tmp, 0, n);
             String response = baos.toString("UTF-8").trim();
-            int msgIdx = response.lastIndexOf("\"message\":\"");
-            if (msgIdx == -1) return null;
-            int start = msgIdx + 11;
-            int end = response.indexOf("\"", start);
-            if (end == -1) return null;
-            return response.substring(start, end);
+            int idx = response.lastIndexOf("\"message\":\"");
+            if (idx == -1) return null;
+            int s = idx + 11, e = response.indexOf("\"", s);
+            return e == -1 ? null : response.substring(s, e);
         } catch (Exception e) {
-            Log.e(TAG, "Get error: " + e.getMessage());
-            return null;
+            Log.e(TAG, "Get error: " + e.getMessage()); return null;
         } finally { if (conn != null) conn.disconnect(); }
     }
 
-    // ── IP DETECTION ──────────────────────────────────────────────────────────
+    // ── IP ────────────────────────────────────────────────────────────────────
     private String getLocalIp() {
         try {
             Socket s = new Socket();
             s.connect(new java.net.InetSocketAddress("8.8.8.8", 80), 3000);
             String ip = s.getLocalAddress().getHostAddress();
-            s.close();
-            return ip;
+            s.close(); return ip;
         } catch (Exception e) {
             try {
                 java.util.Enumeration<java.net.NetworkInterface> ifaces =
@@ -775,7 +688,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                             return addr.getHostAddress();
                     }
                 }
-            } catch (Exception ex) { Log.e(TAG, "IP enum error", ex); }
+            } catch (Exception ex) { Log.e(TAG, "IP error", ex); }
         }
         return null;
     }
@@ -790,11 +703,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     public void surfaceChanged(SurfaceHolder holder, int format, int w, int h) {
         if (camera != null) {
-            try {
-                camera.stopPreview();
-                camera.setPreviewDisplay(holder);
-                camera.startPreview();
-            } catch (Exception ignored) {}
+            try { camera.stopPreview(); camera.setPreviewDisplay(holder); camera.startPreview(); }
+            catch (Exception ignored) {}
         }
     }
 
@@ -803,23 +713,28 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private void openCamera(SurfaceHolder holder) {
         if (cameraRunning || holder == null) return;
         try {
+            // FIX: prefer front camera, fall back to any available camera
             if (Build.VERSION.SDK_INT >= 9) {
                 int numCams = Camera.getNumberOfCameras();
                 Camera.CameraInfo info = new Camera.CameraInfo();
+                int frontIdx = -1, backIdx = -1;
                 for (int i = 0; i < numCams; i++) {
                     Camera.getCameraInfo(i, info);
-                    if (info.facing == Camera.CameraInfo.CAMERA_FACING_BACK) {
-                        camera = Camera.open(i);
-                        break;
-                    }
+                    if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT && frontIdx == -1) frontIdx = i;
+                    if (info.facing == Camera.CameraInfo.CAMERA_FACING_BACK  && backIdx  == -1) backIdx  = i;
                 }
-                if (camera == null && numCams > 0) camera = Camera.open(0);
+                // Prefer front; fall back to back; fall back to camera 0
+                int chosen = (frontIdx != -1) ? frontIdx : (backIdx != -1 ? backIdx : 0);
+                camera = Camera.open(chosen);
             } else {
+                // API 7/8 — only one camera, just open it
                 camera = Camera.open();
             }
-            if (camera == null) { setStatus("No camera found."); return; }
+
+            if (camera == null) { setStatus("No camera."); return; }
 
             Camera.Parameters p = camera.getParameters();
+
             List<Camera.Size> sizes = p.getSupportedPreviewSizes();
             Camera.Size best = sizes.get(0);
             int bestDiff = Math.abs(best.width - FRAME_WIDTH) + Math.abs(best.height - FRAME_HEIGHT);
@@ -829,6 +744,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             }
             p.setPreviewSize(best.width, best.height);
             p.setPreviewFormat(ImageFormat.NV21);
+
             try {
                 List<int[]> fpsRanges = p.getSupportedPreviewFpsRange();
                 if (fpsRanges != null && !fpsRanges.isEmpty()) {
@@ -837,44 +753,40 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                     p.setPreviewFpsRange(lowest[0], lowest[1]);
                 }
             } catch (Exception ignored) {}
-            try { p.setFlashMode(Camera.Parameters.FLASH_MODE_OFF);   } catch (Exception ignored) {}
-            try { p.setFocusMode(Camera.Parameters.FOCUS_MODE_FIXED); } catch (Exception ignored) {}
+
+            try { p.setFlashMode(Camera.Parameters.FLASH_MODE_OFF);    } catch (Exception ignored) {}
+            try { p.setFocusMode(Camera.Parameters.FOCUS_MODE_FIXED);  } catch (Exception ignored) {}
             try { p.setWhiteBalance(Camera.Parameters.WHITE_BALANCE_AUTO); } catch (Exception ignored) {}
+
             camera.setParameters(p);
             camera.setPreviewDisplay(holder);
+
             int bufSize = best.width * best.height * ImageFormat.getBitsPerPixel(ImageFormat.NV21) / 8;
             yuvBuffer = new byte[bufSize];
             camera.addCallbackBuffer(yuvBuffer);
             camera.setPreviewCallbackWithBuffer(this);
             camera.startPreview();
             cameraRunning = true;
+
         } catch (Exception e) {
-            Log.e(TAG, "Camera open error", e);
+            Log.e(TAG, "Camera error", e);
             setStatus("Camera error: " + e.getMessage());
         }
     }
 
     private void closeCamera() {
         if (camera != null) {
-            try {
-                camera.setPreviewCallbackWithBuffer(null);
-                camera.stopPreview();
-                camera.release();
-            } catch (Exception ignored) {}
+            try { camera.setPreviewCallbackWithBuffer(null); camera.stopPreview(); camera.release(); }
+            catch (Exception ignored) {}
             camera = null;
             cameraRunning = false;
         }
     }
 
     // ── LIFECYCLE ─────────────────────────────────────────────────────────────
-    @Override
-    protected void onDestroy() { super.onDestroy(); hangup(); closeCamera(); }
-
-    @Override
-    protected void onPause() { super.onPause(); if (!connected) closeCamera(); }
-
-    @Override
-    protected void onResume() {
+    @Override protected void onDestroy() { super.onDestroy(); hangup(); closeCamera(); }
+    @Override protected void onPause()   { super.onPause();   if (!connected) closeCamera(); }
+    @Override protected void onResume()  {
         super.onResume();
         if (!cameraRunning && surfaceHolder != null) {
             uiHandler.postDelayed(new Runnable() {
