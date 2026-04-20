@@ -20,15 +20,13 @@ import android.os.Handler;
 import android.os.PowerManager;
 import android.os.SystemClock;
 import android.util.Log;
+import android.view.KeyEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.ImageView;
-import android.widget.LinearLayout;
-import android.widget.PopupWindow;
 import android.widget.TextView;
 import android.content.Context;
 
@@ -48,14 +46,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
 
     private static final String TAG = "X10Call";
 
-    // Video — X10 Mini Pro native resolution
     private static final int   FRAME_WIDTH        = 320;
     private static final int   FRAME_HEIGHT       = 240;
     private static final int   JPEG_QUALITY       = 35;
     private static final int   TARGET_FPS         = 12;
     private static final long  FRAME_INTERVAL_MS  = 1000 / TARGET_FPS;
 
-    // Audio — 8kHz mono PCM, minimum CPU
     private static final int  AUDIO_SAMPLE_RATE  = 8000;
     private static final int  AUDIO_CHANNEL_IN   = AudioFormat.CHANNEL_IN_MONO;
     private static final int  AUDIO_CHANNEL_OUT  = AudioFormat.CHANNEL_OUT_MONO;
@@ -63,37 +59,41 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private static final int  AUDIO_BUFFER_MS    = 160;
     private static final int  AUDIO_BUFFER_BYTES = AUDIO_SAMPLE_RATE * 2 * AUDIO_BUFFER_MS / 1000;
 
-    // Packet tags
     private static final int PKT_VIDEO = 1;
     private static final int PKT_AUDIO = 2;
 
-    // ── Pre-call UI ──────────────────────────────────────────────────────────
-    private View      preCallLayout;
-    private View      roomCodeCard;
+    // Pre-call
+    private View        preCallLayout;
+    private View        roomCodeCard;
     private SurfaceView localPreview;
-    private TextView  statusText;
-    private TextView  roomCodeText;
-    private EditText  roomInput;
-    private TextView  hostBtn;
-    private TextView  joinBtn;
+    private TextView    statusText;
+    private TextView    roomCodeText;
+    private EditText    roomInput;
+    private TextView    hostBtn;
+    private TextView    joinBtn;
 
-    // ── In-call UI ───────────────────────────────────────────────────────────
-    private View      inCallLayout;
-    private ImageView remoteView;
-    private TextView  callStatsText;
-    private View      menuAnchor;
+    // In-call
+    private View        inCallLayout;
+    private ImageView   remoteView;
+    private TextView    callStatsText;
+    private View        callControls;   // bottom bar, toggled by menu key / tap
+    private TextView    muteBtn;
+    private TextView    cameraBtn;
+    private TextView    rotateBtn;
+    private TextView    hangupBtn;
+    private boolean     controlsVisible = false;
 
-    // ── Fonts ────────────────────────────────────────────────────────────────
+    // Fonts
     private Typeface robotoRegular;
     private Typeface robotoLight;
 
-    // ── Camera ───────────────────────────────────────────────────────────────
+    // Camera
     private Camera        camera;
     private SurfaceHolder surfaceHolder;
     private boolean       cameraRunning = false;
     private byte[]        yuvBuffer;
 
-    // ── Audio ────────────────────────────────────────────────────────────────
+    // Audio
     private AudioRecord  audioRecord;
     private AudioTrack   audioTrack;
     private Thread       audioSendThread;
@@ -101,10 +101,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private boolean      micMuted     = false;
     private boolean      cameraMuted  = false;
 
-    // ── Video rotation ───────────────────────────────────────────────────────
+    // Video rotation
     private int remoteRotation = 0;
 
-    // ── Network ──────────────────────────────────────────────────────────────
+    // Network
     private ServerSocket     serverSocket;
     private Socket           connSocket;
     private DataOutputStream outStream;
@@ -112,25 +112,28 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     private boolean          connected = false;
     private int              roomCode  = 0;
 
-    // ── Threading ────────────────────────────────────────────────────────────
+    // Threading
     private Handler uiHandler = new Handler();
     private Thread  videoSendThread, recvThread, serverThread, connectThread;
 
-    // ── Frame buffer ─────────────────────────────────────────────────────────
+    // Frame buffer
     private final Object frameLock        = new Object();
     private byte[]       pendingFrameJpeg = null;
     private long         lastSendTime     = 0;
 
-    // ── Output lock ──────────────────────────────────────────────────────────
+    // Output lock
     private final Object outLock = new Object();
 
-    // ── Wake lock ────────────────────────────────────────────────────────────
+    // Wake lock
     private PowerManager.WakeLock wakeLock;
 
-    // ── Stats ────────────────────────────────────────────────────────────────
+    // Stats
     private long     callStartMs   = 0;
     private long     bytesReceived = 0;
     private Runnable statsRunnable;
+
+    // Auto-hide controls after 4 seconds of inactivity
+    private Runnable hideControlsRunnable;
 
     // ─────────────────────────────────────────────────────────────────────────
     @Override
@@ -141,17 +144,16 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
         setContentView(R.layout.main);
 
-        // Load Roboto — pure asset load, zero network, zero library
+        // Load Roboto from assets — one allocation, no library needed
         try {
             robotoRegular = Typeface.createFromAsset(getAssets(), "fonts/Roboto-Regular.ttf");
             robotoLight   = Typeface.createFromAsset(getAssets(), "fonts/Roboto-Light.ttf");
         } catch (Exception e) {
             robotoRegular = Typeface.DEFAULT;
             robotoLight   = Typeface.DEFAULT;
-            Log.w(TAG, "Roboto not found, using system font");
         }
 
-        // ── Wire views ───────────────────────────────────────────────────────
+        // Wire pre-call views
         preCallLayout = findViewById(R.id.preCallLayout);
         roomCodeCard  = findViewById(R.id.roomCodeCard);
         localPreview  = (SurfaceView) findViewById(R.id.localPreview);
@@ -161,23 +163,30 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         hostBtn       = (TextView)    findViewById(R.id.hostBtn);
         joinBtn       = (TextView)    findViewById(R.id.joinBtn);
 
+        // Wire in-call views
         inCallLayout  = findViewById(R.id.inCallLayout);
         remoteView    = (ImageView)   findViewById(R.id.remoteView);
         callStatsText = (TextView)    findViewById(R.id.callStatsText);
-        menuAnchor    = findViewById(R.id.menuAnchor);
+        callControls  = findViewById(R.id.callControls);
+        muteBtn       = (TextView)    findViewById(R.id.muteBtn);
+        cameraBtn     = (TextView)    findViewById(R.id.cameraBtn);
+        rotateBtn     = (TextView)    findViewById(R.id.rotateBtn);
+        hangupBtn     = (TextView)    findViewById(R.id.hangupBtn);
 
-        // Apply Roboto everywhere
-        setFont(statusText,    robotoLight);
-        setFont(roomCodeText,  robotoRegular);
-        setFont(roomInput,     robotoLight);
-        setFont(hostBtn,       robotoRegular);
-        setFont(joinBtn,       robotoRegular);
-        setFont(callStatsText, robotoLight);
-        setFont((TextView) menuAnchor, robotoRegular);
+        // Apply fonts
+        font(statusText,    robotoLight);
+        font(roomCodeText,  robotoRegular);
+        font(roomInput,     robotoLight);
+        font(hostBtn,       robotoRegular);
+        font(joinBtn,       robotoRegular);
+        font(callStatsText, robotoLight);
+        font(muteBtn,       robotoRegular);
+        font(cameraBtn,     robotoRegular);
+        font(rotateBtn,     robotoRegular);
+        font(hangupBtn,     robotoRegular);
 
         remoteView.setScaleType(ImageView.ScaleType.CENTER_CROP);
 
-        // Surface for camera preview
         surfaceHolder = localPreview.getHolder();
         surfaceHolder.addCallback(this);
         try { surfaceHolder.setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS); } catch (Exception ignored) {}
@@ -185,7 +194,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         wakeLock = pm.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "x10call:wakelock");
 
-        // ── Buttons — using TextView so drawables always show correctly ───────
+        // Pre-call buttons
         hostBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { startHost(); }
         });
@@ -196,11 +205,38 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 else setStatus("Enter the 6-digit room code");
             }
         });
-        menuAnchor.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { showCallMenu(v); }
+
+        // Tap remote video to toggle controls
+        remoteView.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { toggleControls(); }
         });
 
-        // ── FIX 1: Audio to loudspeaker via STREAM_MUSIC ─────────────────────
+        // In-call control buttons
+        muteBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                micMuted = !micMuted;
+                muteBtn.setText(micMuted ? "Unmute" : "Mute");
+                scheduleHideControls();
+            }
+        });
+        cameraBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                cameraMuted = !cameraMuted;
+                cameraBtn.setText(cameraMuted ? "Cam on" : "Cam off");
+                scheduleHideControls();
+            }
+        });
+        rotateBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                remoteRotation = (remoteRotation + 90) % 360;
+                scheduleHideControls();
+            }
+        });
+        hangupBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { hangup(); }
+        });
+
+        // Speaker on from the start
         AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         am.setMode(AudioManager.MODE_NORMAL);
         am.setSpeakerphoneOn(true);
@@ -208,9 +244,60 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         showPreCall();
     }
 
-    // ── FONT HELPER ───────────────────────────────────────────────────────────
-    private void setFont(TextView tv, Typeface tf) {
-        if (tv != null && tf != null) tv.setTypeface(tf);
+    // ── HARDWARE KEY INTERCEPT ─────────────────────────────────────────────────
+    // The X10 hardware menu key triggers onKeyDown with KEYCODE_MENU.
+    // We use it to toggle the call controls bar when in a call.
+    // KEYCODE_BACK dismisses controls if visible, otherwise default back behaviour.
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (connected) {
+            if (keyCode == KeyEvent.KEYCODE_MENU) {
+                toggleControls();
+                return true;  // consumed — don't let system handle it
+            }
+            if (keyCode == KeyEvent.KEYCODE_BACK) {
+                if (controlsVisible) {
+                    hideControls();
+                    return true;
+                }
+                // If controls hidden, back key does nothing (prevents accidental exit)
+                return true;
+            }
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
+    // ── CONTROLS VISIBILITY ───────────────────────────────────────────────────
+    private void toggleControls() {
+        if (controlsVisible) hideControls();
+        else showControls();
+    }
+
+    private void showControls() {
+        callControls.setVisibility(View.VISIBLE);
+        controlsVisible = true;
+        scheduleHideControls();
+    }
+
+    private void hideControls() {
+        callControls.setVisibility(View.GONE);
+        controlsVisible = false;
+        cancelHideControls();
+    }
+
+    private void scheduleHideControls() {
+        cancelHideControls();
+        hideControlsRunnable = new Runnable() {
+            public void run() { if (connected) hideControls(); }
+        };
+        uiHandler.postDelayed(hideControlsRunnable, 4000);
+    }
+
+    private void cancelHideControls() {
+        if (hideControlsRunnable != null) {
+            uiHandler.removeCallbacks(hideControlsRunnable);
+            hideControlsRunnable = null;
+        }
     }
 
     // ── SCREEN SWITCHING ──────────────────────────────────────────────────────
@@ -218,6 +305,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         preCallLayout.setVisibility(View.VISIBLE);
         inCallLayout.setVisibility(View.GONE);
         stopStatsUpdater();
+        cancelHideControls();
     }
 
     private void showInCall() {
@@ -226,16 +314,19 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         callStartMs   = SystemClock.elapsedRealtime();
         bytesReceived = 0;
         startStatsUpdater();
+        // Reset button labels
+        muteBtn.setText("Mute");
+        cameraBtn.setText("Cam off");
     }
 
-    // ── STATS OVERLAY ─────────────────────────────────────────────────────────
+    // ── STATS ─────────────────────────────────────────────────────────────────
     private void startStatsUpdater() {
         statsRunnable = new Runnable() {
             public void run() {
                 if (!connected) return;
-                long secs  = (SystemClock.elapsedRealtime() - callStartMs) / 1000;
-                String t   = secs / 60 + ":" + String.format("%02d", secs % 60);
-                callStatsText.setText(t + " · " + fmtBytes(bytesReceived));
+                long s = (SystemClock.elapsedRealtime() - callStartMs) / 1000;
+                callStatsText.setText(s / 60 + ":" + String.format("%02d", s % 60)
+                    + " · " + fmtBytes(bytesReceived));
                 uiHandler.postDelayed(this, 1000);
             }
         };
@@ -247,60 +338,14 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     private String fmtBytes(long b) {
-        if (b < 1024)        return b + "B";
-        if (b < 1048576)     return (b / 1024) + "KB";
+        if (b < 1024)    return b + "B";
+        if (b < 1048576) return (b / 1024) + "KB";
         return String.format("%.1fMB", b / 1048576f);
     }
 
-    // ── IN-CALL POPUP MENU ────────────────────────────────────────────────────
-    private void showCallMenu(View anchor) {
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setBackgroundResource(R.drawable.menu_bg);
-        layout.setPadding(dp(6), dp(6), dp(6), dp(6));
-
-        final PopupWindow popup = new PopupWindow(
-            layout, dp(150), ViewGroup.LayoutParams.WRAP_CONTENT, true);
-
-        addMenuItem(layout, micMuted    ? "Unmute mic"    : "Mute mic",    0xFFFFFFFF, popup, new Runnable() { public void run() { micMuted    = !micMuted;    } });
-        addMenuDivider(layout);
-        addMenuItem(layout, cameraMuted ? "Camera on"     : "Camera off",  0xFFFFFFFF, popup, new Runnable() { public void run() { cameraMuted = !cameraMuted; } });
-        addMenuDivider(layout);
-        addMenuItem(layout, "Rotate video",  0xFFFFFFFF, popup, new Runnable() { public void run() { remoteRotation = (remoteRotation + 90) % 360; } });
-        addMenuDivider(layout);
-        addMenuItem(layout, "End call",      0xFFEF5350, popup, new Runnable() { public void run() { hangup(); } });
-
-        popup.setAnimationStyle(android.R.style.Animation_Dialog);
-        // Show above the anchor — offset upward by estimated menu height
-        popup.showAsDropDown(anchor, 0, -dp(220));
-    }
-
-    private void addMenuItem(LinearLayout parent, final String label, final int color,
-                             final PopupWindow popup, final Runnable action) {
-        TextView tv = new TextView(this);
-        tv.setText(label);
-        tv.setTypeface(robotoRegular);
-        tv.setTextSize(14);
-        tv.setTextColor(color);
-        tv.setPadding(dp(14), dp(13), dp(14), dp(13));
-        tv.setBackgroundResource(R.drawable.menu_item_selector);
-        tv.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) { popup.dismiss(); action.run(); }
-        });
-        parent.addView(tv);
-    }
-
-    private void addMenuDivider(LinearLayout parent) {
-        View v = new View(this);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.FILL_PARENT, 1);
-        v.setLayoutParams(lp);
-        v.setBackgroundColor(0x22FFFFFF);
-        parent.addView(v);
-    }
-
-    private int dp(int val) {
-        return (int) (val * getResources().getDisplayMetrics().density + 0.5f);
+    // ── FONT HELPER ───────────────────────────────────────────────────────────
+    private void font(TextView tv, Typeface tf) {
+        if (tv != null && tf != null) tv.setTypeface(tf);
     }
 
     // ── HOST ──────────────────────────────────────────────────────────────────
@@ -311,7 +356,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         roomInput.setEnabled(false);
         roomCodeCard.setVisibility(View.VISIBLE);
         roomCodeText.setText("" + roomCode);
-        setStatus("Waiting for someone to join...");
+        setStatus("Waiting for caller...");
 
         serverThread = new Thread(new Runnable() {
             public void run() {
@@ -398,7 +443,6 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (wakeLock != null && !wakeLock.isHeld()) wakeLock.acquire();
         uiHandler.post(new Runnable() {
             public void run() {
-                // FIX 1: Re-assert speaker after connection — some devices reset mode
                 AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
                 am.setMode(AudioManager.MODE_NORMAL);
                 am.setSpeakerphoneOn(true);
@@ -417,10 +461,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                 while (connected) {
                     byte[] frame = null;
                     synchronized (frameLock) {
-                        if (pendingFrameJpeg != null) {
-                            frame = pendingFrameJpeg;
-                            pendingFrameJpeg = null;
-                        }
+                        if (pendingFrameJpeg != null) { frame = pendingFrameJpeg; pendingFrameJpeg = null; }
                     }
                     if (frame != null) {
                         if (cameraMuted) frame = getBlackFrame();
@@ -431,10 +472,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                                 outStream.write(frame);
                                 outStream.flush();
                             }
-                        } catch (Exception e) {
-                            if (connected) hangup();
-                            break;
-                        }
+                        } catch (Exception e) { if (connected) hangup(); break; }
                     } else {
                         try { Thread.sleep(5); } catch (InterruptedException ignored) {}
                     }
@@ -482,14 +520,9 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                                 });
                             }
                         } else if (pktType == PKT_AUDIO) {
-                            if (audioTrack != null && audioRunning) {
-                                audioTrack.write(buf, 0, len);
-                            }
+                            if (audioTrack != null && audioRunning) audioTrack.write(buf, 0, len);
                         }
-                    } catch (Exception e) {
-                        if (connected) hangup();
-                        break;
-                    }
+                    } catch (Exception e) { if (connected) hangup(); break; }
                 }
             }
         });
@@ -507,11 +540,10 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         return r;
     }
 
-    // ── AUDIO — FIX 1: STREAM_MUSIC routes to loudspeaker ────────────────────
+    // ── AUDIO — STREAM_MUSIC → loudspeaker ───────────────────────────────────
     private void startAudio() {
         int minBuf = AudioRecord.getMinBufferSize(AUDIO_SAMPLE_RATE, AUDIO_CHANNEL_IN, AUDIO_FORMAT);
         int recBuf = Math.max(minBuf, AUDIO_BUFFER_BYTES);
-
         try {
             audioRecord = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                 AUDIO_SAMPLE_RATE, AUDIO_CHANNEL_IN, AUDIO_FORMAT, recBuf);
@@ -519,16 +551,13 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             try {
                 audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC,
                     AUDIO_SAMPLE_RATE, AUDIO_CHANNEL_IN, AUDIO_FORMAT, recBuf);
-            } catch (Exception e2) {
-                Log.e(TAG, "AudioRecord unavailable"); return;
-            }
+            } catch (Exception e2) { Log.e(TAG, "AudioRecord unavailable"); return; }
         }
 
         int playBuf = Math.max(
             AudioTrack.getMinBufferSize(AUDIO_SAMPLE_RATE, AUDIO_CHANNEL_OUT, AUDIO_FORMAT),
             AUDIO_BUFFER_BYTES);
 
-        // STREAM_MUSIC → goes through media path → main speaker, never earpiece
         audioTrack = new AudioTrack(AudioManager.STREAM_MUSIC,
             AUDIO_SAMPLE_RATE, AUDIO_CHANNEL_OUT, AUDIO_FORMAT,
             playBuf, AudioTrack.MODE_STREAM);
@@ -552,10 +581,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
                                 outStream.write(send, 0, read);
                                 outStream.flush();
                             }
-                        } catch (Exception e) {
-                            if (connected) hangup();
-                            break;
-                        }
+                        } catch (Exception e) { if (connected) hangup(); break; }
                     }
                 }
             }
@@ -591,28 +617,28 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         connected = false;
         stopAudio();
         stopStatsUpdater();
+        cancelHideControls();
         try { if (connSocket   != null) connSocket.close();   } catch (Exception ignored) {}
         try { if (serverSocket != null) serverSocket.close(); } catch (Exception ignored) {}
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         am.setSpeakerphoneOn(false);
         am.setMode(AudioManager.MODE_NORMAL);
-        setStatusUI("Call ended");
         uiHandler.post(new Runnable() {
             public void run() {
                 remoteView.setImageBitmap(null);
                 roomCodeCard.setVisibility(View.GONE);
                 roomCodeText.setText("");
+                hideControls();
                 showPreCall();
                 resetButtons();
+                setStatus("Call ended");
             }
         });
     }
 
     // ── UI HELPERS ────────────────────────────────────────────────────────────
-    private void setStatus(final String msg) {
-        if (statusText != null) statusText.setText(msg);
-    }
+    private void setStatus(final String msg) { if (statusText != null) statusText.setText(msg); }
     private void setStatusUI(final String msg) {
         uiHandler.post(new Runnable() { public void run() { setStatus(msg); } });
     }
@@ -641,9 +667,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             conn.setFixedLengthStreamingMode(body.length);
             conn.getOutputStream().write(body);
             return conn.getResponseCode() >= 200 && conn.getResponseCode() < 300;
-        } catch (Exception e) {
-            Log.e(TAG, "Post error: " + e.getMessage()); return false;
-        } finally { if (conn != null) conn.disconnect(); }
+        } catch (Exception e) { Log.e(TAG, "Post error: " + e.getMessage()); return false; }
+        finally { if (conn != null) conn.disconnect(); }
     }
 
     private String getRendezvous(int code) {
@@ -663,9 +688,8 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
             if (idx == -1) return null;
             int s = idx + 11, e = response.indexOf("\"", s);
             return e == -1 ? null : response.substring(s, e);
-        } catch (Exception e) {
-            Log.e(TAG, "Get error: " + e.getMessage()); return null;
-        } finally { if (conn != null) conn.disconnect(); }
+        } catch (Exception e) { Log.e(TAG, "Get error: " + e.getMessage()); return null; }
+        finally { if (conn != null) conn.disconnect(); }
     }
 
     // ── IP ────────────────────────────────────────────────────────────────────
@@ -693,81 +717,67 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         return null;
     }
 
-    // ── CAMERA LIFECYCLE ──────────────────────────────────────────────────────
+    // ── CAMERA ────────────────────────────────────────────────────────────────
     public void surfaceCreated(SurfaceHolder holder) {
         surfaceHolder = holder;
-        uiHandler.postDelayed(new Runnable() {
-            public void run() { openCamera(surfaceHolder); }
-        }, 400);
+        uiHandler.postDelayed(new Runnable() { public void run() { openCamera(surfaceHolder); } }, 400);
     }
-
     public void surfaceChanged(SurfaceHolder holder, int format, int w, int h) {
         if (camera != null) {
             try { camera.stopPreview(); camera.setPreviewDisplay(holder); camera.startPreview(); }
             catch (Exception ignored) {}
         }
     }
-
     public void surfaceDestroyed(SurfaceHolder holder) { closeCamera(); }
 
     private void openCamera(SurfaceHolder holder) {
         if (cameraRunning || holder == null) return;
         try {
-            // FIX: prefer front camera, fall back to any available camera
             if (Build.VERSION.SDK_INT >= 9) {
-                int numCams = Camera.getNumberOfCameras();
+                int n = Camera.getNumberOfCameras();
                 Camera.CameraInfo info = new Camera.CameraInfo();
                 int frontIdx = -1, backIdx = -1;
-                for (int i = 0; i < numCams; i++) {
+                for (int i = 0; i < n; i++) {
                     Camera.getCameraInfo(i, info);
                     if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT && frontIdx == -1) frontIdx = i;
                     if (info.facing == Camera.CameraInfo.CAMERA_FACING_BACK  && backIdx  == -1) backIdx  = i;
                 }
-                // Prefer front; fall back to back; fall back to camera 0
                 int chosen = (frontIdx != -1) ? frontIdx : (backIdx != -1 ? backIdx : 0);
                 camera = Camera.open(chosen);
             } else {
-                // API 7/8 — only one camera, just open it
                 camera = Camera.open();
             }
-
             if (camera == null) { setStatus("No camera."); return; }
 
             Camera.Parameters p = camera.getParameters();
-
             List<Camera.Size> sizes = p.getSupportedPreviewSizes();
             Camera.Size best = sizes.get(0);
             int bestDiff = Math.abs(best.width - FRAME_WIDTH) + Math.abs(best.height - FRAME_HEIGHT);
-            for (Camera.Size s : sizes) {
-                int diff = Math.abs(s.width - FRAME_WIDTH) + Math.abs(s.height - FRAME_HEIGHT);
-                if (diff < bestDiff) { best = s; bestDiff = diff; }
+            for (Camera.Size sz : sizes) {
+                int diff = Math.abs(sz.width - FRAME_WIDTH) + Math.abs(sz.height - FRAME_HEIGHT);
+                if (diff < bestDiff) { best = sz; bestDiff = diff; }
             }
             p.setPreviewSize(best.width, best.height);
             p.setPreviewFormat(ImageFormat.NV21);
-
             try {
-                List<int[]> fpsRanges = p.getSupportedPreviewFpsRange();
-                if (fpsRanges != null && !fpsRanges.isEmpty()) {
-                    int[] lowest = fpsRanges.get(0);
-                    for (int[] r : fpsRanges) { if (r[1] < lowest[1]) lowest = r; }
+                List<int[]> ranges = p.getSupportedPreviewFpsRange();
+                if (ranges != null && !ranges.isEmpty()) {
+                    int[] lowest = ranges.get(0);
+                    for (int[] r : ranges) { if (r[1] < lowest[1]) lowest = r; }
                     p.setPreviewFpsRange(lowest[0], lowest[1]);
                 }
             } catch (Exception ignored) {}
-
             try { p.setFlashMode(Camera.Parameters.FLASH_MODE_OFF);    } catch (Exception ignored) {}
             try { p.setFocusMode(Camera.Parameters.FOCUS_MODE_FIXED);  } catch (Exception ignored) {}
             try { p.setWhiteBalance(Camera.Parameters.WHITE_BALANCE_AUTO); } catch (Exception ignored) {}
-
             camera.setParameters(p);
             camera.setPreviewDisplay(holder);
-
             int bufSize = best.width * best.height * ImageFormat.getBitsPerPixel(ImageFormat.NV21) / 8;
             yuvBuffer = new byte[bufSize];
             camera.addCallbackBuffer(yuvBuffer);
             camera.setPreviewCallbackWithBuffer(this);
             camera.startPreview();
             cameraRunning = true;
-
         } catch (Exception e) {
             Log.e(TAG, "Camera error", e);
             setStatus("Camera error: " + e.getMessage());
@@ -778,8 +788,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
         if (camera != null) {
             try { camera.setPreviewCallbackWithBuffer(null); camera.stopPreview(); camera.release(); }
             catch (Exception ignored) {}
-            camera = null;
-            cameraRunning = false;
+            camera = null; cameraRunning = false;
         }
     }
 
@@ -789,9 +798,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback, Ca
     @Override protected void onResume()  {
         super.onResume();
         if (!cameraRunning && surfaceHolder != null) {
-            uiHandler.postDelayed(new Runnable() {
-                public void run() { openCamera(surfaceHolder); }
-            }, 400);
+            uiHandler.postDelayed(new Runnable() { public void run() { openCamera(surfaceHolder); } }, 400);
         }
     }
 }
