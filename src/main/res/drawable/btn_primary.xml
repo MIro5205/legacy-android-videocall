@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- res/drawable/btn_primary.xml
+     Rounded button — Google Blue (#1A73E8).
+     Uses selector for pressed state feedback (no StateListAnimator needed).
+     Works on API 7+. Zero weight. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <corners android:radius="24dp" />
+            <solid android:color="#FF1557C0" />   <!-- darker blue on press -->
+            <padding android:left="16dp" android:right="16dp"
+                     android:top="14dp"  android:bottom="14dp" />
+        </shape>
+    </item>
+
+    <item android:state_enabled="false">
+        <shape android:shape="rectangle">
+            <corners android:radius="24dp" />
+            <solid android:color="#44FFFFFF" />
+            <padding android:left="16dp" android:right="16dp"
+                     android:top="14dp"  android:bottom="14dp" />
+        </shape>
+    </item>
+
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="24dp" />
+            <solid android:color="#FF1A73E8" />   <!-- Google Blue -->
+            <padding android:left="16dp" android:right="16dp"
+                     android:top="14dp"  android:bottom="14dp" />
+        </shape>
+    </item>
+
+</selector>
