@@ -1,0 +1,82 @@
+name: Build X10Call APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK components
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platforms;android-10" "build-tools;30.0.3"
+      - name: Update build.gradle for modern Gradle
+        run: |
+          cat > build.gradle << 'EOF'
+          buildscript {
+              repositories { google(); mavenCentral() }
+              dependencies { classpath 'com.android.tools.build:gradle:7.4.2' }
+          }
+          apply plugin: 'com.android.application'
+          android {
+              compileSdkVersion 30
+              buildToolsVersion "30.0.3"
+              defaultConfig {
+                  minSdkVersion 7
+                  targetSdkVersion 7
+                  versionCode 1
+                  versionName "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_1_8
+                  targetCompatibility JavaVersion.VERSION_1_8
+              }
+          }
+          dependencies {}
+          EOF
+          cat > settings.gradle << 'EOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = 'X10Call'
+          EOF
+      - name: Install Gradle 7.5
+        run: |
+          wget -q https://services.gradle.org/distributions/gradle-7.5-bin.zip
+          unzip -q gradle-7.5-bin.zip
+          echo "$PWD/gradle-7.5/bin" >> $GITHUB_PATH
+      - name: Create app icon
+        run: |
+          mkdir -p src/main/res/drawable
+          convert -size 48x48 xc:#1a1a2e -fill white -gravity center \
+            -pointsize 10 -annotate 0 "CALL" src/main/res/drawable/ic_launcher.png || \
+          printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x000\x00\x00\x000\x08\x02\x00\x00\x00\xb4\x88\x9b\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82' \
+            > src/main/res/drawable/ic_launcher.png
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: X10Call-APK
+          path: build/outputs/apk/debug/*.apk
+          retention-days: 30
