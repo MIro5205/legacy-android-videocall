@@ -1,9 +1,10 @@
 buildscript {
     repositories {
+        google()
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:1.5.0'
+        classpath 'com.android.tools.build:gradle:8.1.0'
     }
 }
 
@@ -11,7 +12,7 @@ apply plugin: 'com.android.application'
 
 android {
     compileSdkVersion 34
-    buildToolsVersion "23.0.3"
+    buildToolsVersion "34.0.0"
 
     defaultConfig {
         minSdkVersion 7
@@ -21,8 +22,8 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_6
-        targetCompatibility JavaVersion.VERSION_1_6
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
     }
 
     buildTypes {
@@ -34,5 +35,4 @@ android {
 }
 
 dependencies {
-    // Zero external dependencies — pure Android SDK
 }
