@@ -25,6 +25,9 @@ jobs:
           yes | sdkmanager --licenses || true
           sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
       - name: Build APK
         run: ./gradlew assembleDebug --no-daemon
 
