@@ -1,10 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Two screens in one FrameLayout. Only one visible at a time.
+    White, Google-style. ScrollView guards against X10 Mini Pro clipping.
+    No PopupWindow — call controls slide up from bottom as a simple View.
+-->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="fill_parent"
     android:layout_height="fill_parent"
     android:background="#FFFFFFFF">
 
-    <!-- PRE-CALL SCREEN -->
+    <!-- ═══════════════════════════════════════════════
+         PRE-CALL SCREEN
+         ═══════════════════════════════════════════════ -->
     <ScrollView
         android:id="@+id/preCallLayout"
         android:layout_width="fill_parent"
@@ -18,22 +25,31 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:gravity="center_horizontal"
-            android:paddingLeft="20dp"
-            android:paddingRight="20dp"
-            android:paddingTop="18dp"
-            android:paddingBottom="18dp">
+            android:paddingLeft="24dp"
+            android:paddingRight="24dp"
+            android:paddingTop="24dp"
+            android:paddingBottom="24dp">
 
-            <!-- App name -->
+            <!-- Logo mark — simple coloured circle + wordmark, zero weight -->
+            <TextView
+                android:layout_width="52dp"
+                android:layout_height="52dp"
+                android:text="&#9990;"
+                android:textColor="#FFFFFFFF"
+                android:textSize="26sp"
+                android:gravity="center"
+                android:background="@drawable/logo_bg"
+                android:layout_marginBottom="10dp" />
+
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="X10 Call"
                 android:textColor="#FF1A73E8"
-                android:textSize="24sp"
+                android:textSize="22sp"
                 android:textStyle="bold"
                 android:layout_marginBottom="4dp" />
 
-            <!-- Status line -->
             <TextView
                 android:id="@+id/statusText"
                 android:layout_width="fill_parent"
@@ -42,16 +58,17 @@
                 android:textColor="#FF5F6368"
                 android:textSize="12sp"
                 android:gravity="center"
-                android:layout_marginBottom="14dp" />
+                android:minHeight="18dp"
+                android:layout_marginBottom="16dp" />
 
-            <!-- Self camera preview -->
+            <!-- Camera self-view -->
             <SurfaceView
                 android:id="@+id/localPreview"
                 android:layout_width="128dp"
                 android:layout_height="96dp"
-                android:layout_marginBottom="14dp" />
+                android:layout_marginBottom="16dp" />
 
-            <!-- Room code card, shown only after hosting -->
+            <!-- Room code card — hidden until host taps Start -->
             <LinearLayout
                 android:id="@+id/roomCodeCard"
                 android:layout_width="fill_parent"
@@ -59,19 +76,20 @@
                 android:orientation="vertical"
                 android:gravity="center"
                 android:background="@drawable/card_bg"
-                android:paddingTop="10dp"
-                android:paddingBottom="10dp"
+                android:paddingTop="12dp"
+                android:paddingBottom="12dp"
                 android:paddingLeft="12dp"
                 android:paddingRight="12dp"
-                android:layout_marginBottom="14dp"
+                android:layout_marginBottom="16dp"
                 android:visibility="gone">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Your room code"
+                    android:text="Share this code"
                     android:textColor="#FF5F6368"
-                    android:textSize="11sp" />
+                    android:textSize="11sp"
+                    android:layout_marginBottom="4dp" />
 
                 <TextView
                     android:id="@+id/roomCodeText"
@@ -79,12 +97,13 @@
                     android:layout_height="wrap_content"
                     android:text=""
                     android:textColor="#FF1A73E8"
-                    android:textSize="26sp"
-                    android:textStyle="bold" />
+                    android:textSize="30sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0" />
 
             </LinearLayout>
 
-            <!-- START CALL -->
+            <!-- START CALL — solid blue pill -->
             <TextView
                 android:id="@+id/hostBtn"
                 android:layout_width="fill_parent"
@@ -95,35 +114,21 @@
                 android:textStyle="bold"
                 android:gravity="center"
                 android:background="@drawable/btn_primary"
-                android:layout_marginBottom="10dp" />
+                android:layout_marginBottom="12dp" />
 
-            <!-- OR divider -->
+            <!-- Divider -->
             <LinearLayout
                 android:layout_width="fill_parent"
-                android:layout_height="16dp"
+                android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:layout_marginBottom="10dp">
-
-                <View
-                    android:layout_width="0dp"
-                    android:layout_height="1dp"
-                    android:layout_weight="1"
-                    android:background="#FFE0E0E0" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="  or  "
-                    android:textColor="#FF9AA0A6"
-                    android:textSize="11sp" />
-
-                <View
-                    android:layout_width="0dp"
-                    android:layout_height="1dp"
-                    android:layout_weight="1"
-                    android:background="#FFE0E0E0" />
-
+                android:layout_marginBottom="12dp">
+                <View android:layout_width="0dp" android:layout_height="1dp"
+                    android:layout_weight="1" android:background="#FFE8EAED" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="  or join  " android:textColor="#FF9AA0A6" android:textSize="11sp" />
+                <View android:layout_width="0dp" android:layout_height="1dp"
+                    android:layout_weight="1" android:background="#FFE8EAED" />
             </LinearLayout>
 
             <!-- Code input -->
@@ -131,22 +136,22 @@
                 android:id="@+id/roomInput"
                 android:layout_width="fill_parent"
                 android:layout_height="48dp"
-                android:hint="6-digit room code"
+                android:hint="Room code"
                 android:textColorHint="#FF9AA0A6"
                 android:textColor="#FF202124"
-                android:textSize="16sp"
+                android:textSize="18sp"
                 android:inputType="number"
                 android:maxLength="6"
                 android:gravity="center"
                 android:background="@drawable/input_bg"
                 android:layout_marginBottom="10dp" />
 
-            <!-- JOIN CALL -->
+            <!-- JOIN CALL — outlined pill -->
             <TextView
                 android:id="@+id/joinBtn"
                 android:layout_width="fill_parent"
                 android:layout_height="48dp"
-                android:text="Join call"
+                android:text="Join"
                 android:textColor="#FF1A73E8"
                 android:textSize="15sp"
                 android:textStyle="bold"
@@ -156,13 +161,19 @@
         </LinearLayout>
     </ScrollView>
 
-    <!-- IN-CALL SCREEN — pure video + hidden menu -->
+
+    <!-- ═══════════════════════════════════════════════
+         IN-CALL SCREEN
+         Full-screen video. Controls are a plain View
+         at the bottom — no PopupWindow, no offset bugs.
+         ═══════════════════════════════════════════════ -->
     <FrameLayout
         android:id="@+id/inCallLayout"
         android:layout_width="fill_parent"
         android:layout_height="fill_parent"
         android:visibility="gone">
 
+        <!-- Remote video — fills every pixel -->
         <ImageView
             android:id="@+id/remoteView"
             android:layout_width="fill_parent"
@@ -170,32 +181,109 @@
             android:scaleType="centerCrop"
             android:background="#FF000000" />
 
+        <!-- Stats: elapsed + data, top-right, text shadow only -->
         <TextView
             android:id="@+id/callStatsText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="top|right"
             android:layout_margin="8dp"
-            android:text="0:00 · 0KB"
+            android:text="0:00 · 0B"
             android:textColor="#FFFFFFFF"
             android:textSize="11sp"
-            android:shadowColor="#CC000000"
-            android:shadowDx="0"
-            android:shadowDy="1"
-            android:shadowRadius="3" />
+            android:shadowColor="#AA000000"
+            android:shadowDx="0" android:shadowDy="1" android:shadowRadius="3" />
 
-        <!-- ⋮ button — dark pill, always visible over video -->
-        <TextView
-            android:id="@+id/menuAnchor"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:layout_gravity="bottom|right"
-            android:layout_margin="10dp"
-            android:text="&#8942;"
-            android:textColor="#FFFFFFFF"
-            android:textSize="22sp"
-            android:gravity="center"
-            android:background="@drawable/menu_fab_bg" />
+        <!--
+            CALL CONTROLS — always at the bottom, initially GONE.
+            Toggled by the hardware Menu key (onKeyDown) AND by tapping the video.
+            This completely avoids PopupWindow positioning bugs on legacy Android.
+        -->
+        <LinearLayout
+            android:id="@+id/callControls"
+            android:layout_width="fill_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:orientation="vertical"
+            android:background="@drawable/controls_bg"
+            android:paddingTop="12dp"
+            android:paddingBottom="12dp"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:visibility="gone">
+
+            <!-- Row 1: Mute + Camera toggle -->
+            <LinearLayout
+                android:layout_width="fill_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:layout_marginBottom="8dp">
+
+                <TextView
+                    android:id="@+id/muteBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="Mute"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:background="@drawable/ctrl_btn_bg"
+                    android:layout_marginRight="6dp" />
+
+                <TextView
+                    android:id="@+id/cameraBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="Cam off"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:background="@drawable/ctrl_btn_bg"
+                    android:layout_marginLeft="6dp" />
+
+            </LinearLayout>
+
+            <!-- Row 2: Rotate + End call -->
+            <LinearLayout
+                android:layout_width="fill_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center">
+
+                <TextView
+                    android:id="@+id/rotateBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="Rotate"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:background="@drawable/ctrl_btn_bg"
+                    android:layout_marginRight="6dp" />
+
+                <TextView
+                    android:id="@+id/hangupBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="End call"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:gravity="center"
+                    android:background="@drawable/ctrl_btn_red"
+                    android:layout_marginLeft="6dp" />
+
+            </LinearLayout>
+
+        </LinearLayout>
 
     </FrameLayout>
 
