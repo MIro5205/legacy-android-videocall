@@ -13,42 +13,68 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 8
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '8'
+          java-version: '17'
           distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Install SDK components
         run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-10" "build-tools;23.0.3"
+          yes | sdkmanager --licenses || true
+          sdkmanager "platforms;android-10" "build-tools;30.0.3"
+
+      - name: Update build.gradle for modern Gradle
+        run: |
+          cat > build.gradle << 'EOF'
+          buildscript {
+              repositories { google(); mavenCentral() }
+              dependencies { classpath 'com.android.tools.build:gradle:7.4.2' }
+          }
+          apply plugin: 'com.android.application'
+          android {
+              compileSdkVersion 30
+              buildToolsVersion "30.0.3"
+              defaultConfig {
+                  minSdkVersion 7
+                  targetSdkVersion 7
+                  versionCode 1
+                  versionName "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_1_8
+                  targetCompatibility JavaVersion.VERSION_1_8
+              }
+          }
+          dependencies {}
+          EOF
+
+          cat > settings.gradle << 'EOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = 'X10Call'
+          EOF
+
+      - name: Install Gradle 7.5
+        run: |
+          wget -q https://services.gradle.org/distributions/gradle-7.5-bin.zip
+          unzip -q gradle-7.5-bin.zip
+          echo "$PWD/gradle-7.5/bin" >> $GITHUB_PATH
 
       - name: Create app icon
         run: |
           mkdir -p src/main/res/drawable
-          python3 -c "
-          import struct, zlib
-          def chunk(name, data):
-              c = name + data
-              return struct.pack('>I', len(data)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
-          sig = b'\x89PNG\r\n\x1a\n'
-          ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', 48, 48, 8, 2, 0, 0, 0))
-          raw = b''.join(b'\x00' + b'\x1a\x73\xe8' * 48 for _ in range(48))
-          png = sig + ihdr + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
-          open('src/main/res/drawable/ic_launcher.png', 'wb').write(png)
-          "
-
-      - name: Fix layout compatibility
-        run: |
-          sed -i '/android:letterSpacing/d' src/main/res/layout/main.xml
-          sed -i '/android:fillViewport/d' src/main/res/layout/main.xml
-
-      - name: Install Gradle 2.14.1
-        run: |
-          wget -q https://services.gradle.org/distributions/gradle-2.14.1-bin.zip
-          unzip -q gradle-2.14.1-bin.zip
-          echo "$PWD/gradle-2.14.1/bin" >> $GITHUB_PATH
+          convert -size 48x48 xc:#1a1a2e -fill white -gravity center \
+            -pointsize 10 -annotate 0 "CALL" src/main/res/drawable/ic_launcher.png || \
+          printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x000\x00\x00\x000\x08\x02\x00\x00\x00\xb4\x88\x9b\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82' \
+            > src/main/res/drawable/ic_launcher.png
 
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
@@ -57,5 +83,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: X10Call-APK
-          path: build/outputs/apk/*.apk
+          path: build/outputs/apk/debug/*.apk
           retention-days: 30
